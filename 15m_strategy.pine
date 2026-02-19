@@ -4,6 +4,23 @@ indicator("15m Strategy by Charlie A.", overlay=true)
 ADX_GROUP = "ADX"
 MACD_GROUP = "MACD"
 
+// Input for table position
+tablePosition = input.string(defval = "Top Right", title = "Table Position", options = ["Top Right", "Bottom Right", "Middle Right", "Bottom Center", "Middle Left", "Top Left", "Top Center", "Middle Center", "Bottom Left"])
+
+// Convert input string to position enum
+getPos(pos) =>
+    switch pos
+        "Top Right" => position.top_right
+        "Bottom Right" => position.bottom_right
+        "Middle Right" => position.middle_right
+        "Bottom Center" => position.bottom_center
+        "Middle Left" => position.middle_left
+        "Top Left" => position.top_left
+        "Top Center" => position.top_center
+        "Middle Center" => position.middle_center
+        "Bottom Left" => position.bottom_left
+
+
 // --- ADX Inputs ---
 adxLength     = input.int(14, title="ADX Smoothing", group=ADX_GROUP)
 diLength      = input.int(14, title="DI Length", group=ADX_GROUP)
@@ -14,10 +31,7 @@ adxThreshold  = input.int(25, title="ADX Strength Threshold", group=ADX_GROUP)
 fastLength    = input.int(12, "Fast EMA Length", minval=1, group=MACD_GROUP)
 slowLength    = input.int(26, "Slow EMA Length", minval=1, group=MACD_GROUP)
 signalLength  = input.int(9,  "Signal Smoothing", minval=1, group=MACD_GROUP)
-smoothLength    = input.int(30, "Smoothing Period", minval=1, group=MACD_GROUP)
-normLength      = input.int(30, "Normalization Period", minval=1, group=MACD_GROUP)
 macdSource    = input.source(close, "Source", group=MACD_GROUP)
-gamma = input.float(0.02, "Laguerre Gamma")
 
 // --- RSI Inputs ---
 rsiLen = input.int(14, "RSI Length", group="RSI")
@@ -81,14 +95,14 @@ bearishThreshold = low + (candleRange * 0.25)
 
 adxRising = adxVal > 23 and adxVal >= adxVal[1] 
 //(bullishCross or (hist > 0 and hist > hist[1]) ) and (candleRange > 0 and close >= bullishThreshold)
-bullishGO = (rsiVal > 30) and (adxVal >= adxVal[1]) and (diGap > 7 and diPlus > diMinus)
+bullishGO = (rsiVal > 30) and (adxVal >= adxVal[1]) and (diGap > 10 and diPlus > diMinus)
   and (candleRange > 0 and close >= bullishThreshold)
 
 // BEARISH: RSI < 75, ADX Strong/Rising, MACD < 0 & Expanding Negatively, Close in Bottom 25%
 // Note: hist < hist[1] when hist is negative means it's growing "lower" (expanding down)
 
 //bearishGO = (rsiVal < 70)  and (bearishCross or (hist < 0 and hist < hist[1]) ) and (candleRange > 0 and close <= bearishThreshold)
-bearishGO = (rsiVal < 70) and (adxVal >= adxVal[1]) and (diGap > 7 and diMinus > diPlus)
+bearishGO = (rsiVal < 70) and (adxVal >= adxVal[1]) and (diGap > 10 and diMinus > diPlus)
   and (candleRange > 0 and close <= bearishThreshold)
 
 // --- 4. Plotting Shapes & Colors ---
@@ -116,7 +130,7 @@ alertcondition(bullishGO or bearishGO, title="Any Signal", message="Momentum Sig
 
 
 // --- Table Setup ---
-var adxTable = table.new(position.top_right, 6, 7, border_width = 1, frame_color = color.gray)
+var adxTable = table.new(getPos(tablePosition), 6, 7, border_width = 1, frame_color = color.gray)
 
 if barstate.islast
     
@@ -155,7 +169,7 @@ if barstate.islast
 
     // DI Gap
     table.cell(adxTable, 0, 4, "DI Gap", bgcolor = color.new(color.gray, 50), text_color = color.white)    
-    table.cell(adxTable, 1, 4, str.tostring(diGap, "#.##"), bgcolor = diGap > 7 ? trendColor : color.gray, text_color = color.white)
+    table.cell(adxTable, 1, 4, str.tostring(diGap, "#.##"), bgcolor = diGap > 10 ? trendColor : color.gray, text_color = color.white)
     table.cell(adxTable, 2, 4, str.tostring(diGap[1], "#.##"), bgcolor = color.gray, text_color = color.white)
     table.cell(adxTable, 3, 4, str.tostring(diGap[2], "#.##"), bgcolor = color.gray, text_color = color.white)
     table.cell(adxTable, 4, 4, str.tostring(diGap[3], "#.##"), bgcolor = color.gray, text_color = color.white)

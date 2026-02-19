@@ -1,0 +1,181 @@
+//@version=6
+indicator("15m Strategy by Charlie A.", overlay=true)
+
+ADX_GROUP = "ADX"
+MACD_GROUP = "MACD"
+
+// --- ADX Inputs ---
+adxLength     = input.int(14, title="ADX Smoothing", group=ADX_GROUP)
+diLength      = input.int(14, title="DI Length", group=ADX_GROUP)
+adxThreshold  = input.int(25, title="ADX Strength Threshold", group=ADX_GROUP)
+
+// --- MACD Inputs ---
+// These appear in the "Settings" menu of your indicator
+fastLength    = input.int(12, "Fast EMA Length", minval=1, group=MACD_GROUP)
+slowLength    = input.int(26, "Slow EMA Length", minval=1, group=MACD_GROUP)
+signalLength  = input.int(9,  "Signal Smoothing", minval=1, group=MACD_GROUP)
+smoothLength    = input.int(30, "Smoothing Period", minval=1, group=MACD_GROUP)
+normLength      = input.int(30, "Normalization Period", minval=1, group=MACD_GROUP)
+macdSource    = input.source(close, "Source", group=MACD_GROUP)
+gamma = input.float(0.02, "Laguerre Gamma")
+
+// --- RSI Inputs ---
+rsiLen = input.int(14, "RSI Length", group="RSI")
+
+// ADX
+[diPlus, diMinus, adxVal] = ta.dmi(diLength, adxLength)
+diGap = diPlus > diMinus ? (diPlus - diMinus) : (diMinus - diPlus)
+
+// ATR
+atrLen = input.int(14, "ATR Length", group="Volatility")
+
+// Direction & Cross Logic
+bool isAdxBullish = diPlus > diMinus
+
+// Detect the Cross
+bool isAdxBullishCross = ta.crossover(diPlus, diMinus)  // +DI goes ABOVE -DI
+bool isAdxBearishCross = ta.crossunder(diPlus, diMinus) // +DI goes BELOW -DI
+
+
+// --- Smoothed No-Lag Normalized MACD  ---
+
+// --- Zero Lag EMA ---
+getZLEMA(src, length) =>
+    lag = math.floor((length - 1) / 2)
+    zlema = ta.ema(src + (src - src[lag]), length)
+    zlema
+
+lag(g, p) => // Laguerre PPO Code from TheLark
+    L0=0.0, L0 := (1 - g)*p+g*nz(L0[1])
+    L1=0.0, L1 := -g*L0+nz(L0[1])+g*nz(L1[1])
+    L2=0.0, L2 := -g*L1+nz(L1[1])+g*nz(L2[1])
+    L3=0.0, L3 := -g*L2+nz(L2[1])+g*nz(L3[1])
+    (L0 + 2*L1 + 2*L2 + L3)/6
+
+// --- Zero Lag MACD ---
+fastZL   = getZLEMA(close, fastLength)
+slowZL   = getZLEMA(close, slowLength)
+//macd = lag(gamma, fastZL - slowZL)
+macd = fastZL - slowZL
+
+signal = getZLEMA(macd, signalLength)
+hist = macd - signal
+
+// End MACD Calculations
+
+
+// --- RSI  ---
+rsiVal = ta.rsi(close, rsiLen)
+
+// --- ATR ---
+atrVal = ta.atr(atrLen)
+
+// --- Strong close candles ---
+candleRange = high - low
+bullishThreshold = low + (candleRange * 0.75)
+bearishThreshold = low + (candleRange * 0.25)
+
+// --- The Logic Filters ---
+
+// BULLISH: RSI > 25, ADX Strong/Rising, MACD > 0 & Expanding, Close in Top 25%
+
+adxRising = adxVal > 23 and adxVal >= adxVal[1] 
+//(bullishCross or (hist > 0 and hist > hist[1]) ) and (candleRange > 0 and close >= bullishThreshold)
+bullishGO = (rsiVal > 30) and (adxVal >= adxVal[1]) and (diGap > 7 and diPlus > diMinus)
+  and (candleRange > 0 and close >= bullishThreshold)
+
+// BEARISH: RSI < 75, ADX Strong/Rising, MACD < 0 & Expanding Negatively, Close in Bottom 25%
+// Note: hist < hist[1] when hist is negative means it's growing "lower" (expanding down)
+
+//bearishGO = (rsiVal < 70)  and (bearishCross or (hist < 0 and hist < hist[1]) ) and (candleRange > 0 and close <= bearishThreshold)
+bearishGO = (rsiVal < 70) and (adxVal >= adxVal[1]) and (diGap > 7 and diMinus > diPlus)
+  and (candleRange > 0 and close <= bearishThreshold)
+
+// --- 4. Plotting Shapes & Colors ---
+
+// Bullish Signals
+plotshape(bullishGO, title="Bullish GO", style=shape.arrowup, location=location.belowbar, color=color.fuchsia, size=size.small, text="", textcolor = color.lime)
+//barcolor(bullishGO ? color.lime : na)
+
+// Bearish Signals
+plotshape(bearishGO, title="Bearish GO", style=shape.arrowdown, location=location.abovebar, color=color.fuchsia, size=size.small, text="", textcolor = color.red)
+//barcolor(bearishGO ? color.red : na)
+
+// --- 5. Alert Configuration ---
+
+// Individual Alerts
+alertcondition(bullishGO, title="Bullish Signal", message="BULLISH GO: {{ticker}} at {{close}}")
+alertcondition(bearishGO, title="Bearish Signal", message="BEARISH GO: {{ticker}} at {{close}}")
+
+// Combined Alert (Single alert for any signal)
+alertcondition(bullishGO or bearishGO, title="Any Signal", message="Momentum Signal on {{ticker}}: Price is {{close}}")
+
+// --- Strong close candles ---
+
+
+
+
+// --- Table Setup ---
+var adxTable = table.new(position.top_right, 6, 7, border_width = 1, frame_color = color.gray)
+
+if barstate.islast
+    
+    // ROW 1: ADX Value & Checkmark
+    // The checkmark appears only if ADX > 25 AND it is not falling    
+    
+    color skipColor = color.new(color.yellow, 50)
+    color adxBgColor = color.new(color.lime, 30) 
+    color trendColor = diPlus > diMinus ? color.green : diMinus > diPlus ? color.red : color.gray
+
+    // RSI
+    table.cell(adxTable, 0, 0, "RSI", bgcolor = color.new(color.gray, 50), text_color = color.white)
+    table.cell(adxTable, 1, 0, str.tostring(rsiVal, "#.##"), bgcolor = color.new(color.blue, 30), text_color = color.white)
+  
+
+    // ADX
+    table.cell(adxTable, 0, 1, "ADX", bgcolor = color.new(color.gray, 50), text_color = color.white)
+    table.cell(adxTable, 1, 1, str.tostring(adxVal, "#.##"), bgcolor = adxVal >= 25 ? trendColor : color.new(color.yellow, 10), text_color = color.white)
+    table.cell(adxTable, 2, 1, str.tostring(adxVal[1], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 3, 1, str.tostring(adxVal[2], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 4, 1, str.tostring(adxVal[3], "#.##"), bgcolor = color.gray, text_color = color.white)
+    
+    // DI+ or DI- (whichever is higher)
+    table.cell(adxTable, 0, 2, diPlus > diMinus ? "DI+" : "DI-", bgcolor = color.new(color.gray, 50), text_color = color.white)    
+    table.cell(adxTable, 1, 2, str.tostring(diPlus > diMinus ? diPlus : diMinus, "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 2, 2, str.tostring(diPlus > diMinus ? diPlus[1] : diMinus[1], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 3, 2, str.tostring(diPlus > diMinus ? diPlus[2] : diMinus[2], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 4, 2, str.tostring(diPlus > diMinus ? diPlus[3] : diMinus[3], "#.##"), bgcolor = color.gray, text_color = color.white)
+
+    // DI+ or DI- (whichever is lower)
+    table.cell(adxTable, 0, 3, diPlus < diMinus ? "DI+" : "DI-", bgcolor = color.new(color.gray, 50), text_color = color.white)    
+    table.cell(adxTable, 1, 3, str.tostring(diPlus < diMinus ? diPlus : diMinus, "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 2, 3, str.tostring(diPlus < diMinus ? diPlus[1] : diMinus[1], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 3, 3, str.tostring(diPlus < diMinus ? diPlus[2] : diMinus[2], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 4, 3, str.tostring(diPlus < diMinus ? diPlus[3] : diMinus[3], "#.##"), bgcolor = color.gray, text_color = color.white)
+
+    // DI Gap
+    table.cell(adxTable, 0, 4, "DI Gap", bgcolor = color.new(color.gray, 50), text_color = color.white)    
+    table.cell(adxTable, 1, 4, str.tostring(diGap, "#.##"), bgcolor = diGap > 7 ? trendColor : color.gray, text_color = color.white)
+    table.cell(adxTable, 2, 4, str.tostring(diGap[1], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 3, 4, str.tostring(diGap[2], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 4, 4, str.tostring(diGap[3], "#.##"), bgcolor = color.gray, text_color = color.white)
+    
+    // MACD
+    table.cell(adxTable, 0, 5, "MACD", bgcolor = color.new(color.gray, 50), text_color = color.white)    
+    table.cell(adxTable, 1, 5, str.tostring(macd, "#.##"), bgcolor = macd > signal ? color.new(color.lime, 50) : color.new(color.red, 30), text_color = color.white)
+    table.cell(adxTable, 2, 5, str.tostring(macd[1], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 3, 5, str.tostring(macd[2], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 4, 5, str.tostring(macd[3], "#.##"), bgcolor = color.gray, text_color = color.white)
+
+    // Histogram
+    table.cell(adxTable, 0, 6, "Hist", bgcolor = color.new(color.gray, 50), text_color = color.white)    
+    table.cell(adxTable, 1, 6, str.tostring(hist, "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 2, 6, str.tostring(hist[1], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 3, 6, str.tostring(hist[2], "#.##"), bgcolor = color.gray, text_color = color.white)
+    table.cell(adxTable, 4, 6, str.tostring(hist[3], "#.##"), bgcolor = color.gray, text_color = color.white)
+
+    // ATR
+    // table.cell(adxTable, 0, 4, "ATR", bgcolor = labelBgColor, text_color = color.white)
+    // table.cell(adxTable, 1, 4, str.tostring(atrVal, "#.##"), bgcolor = atrVal >= 0.5 ? trendColor : color.gray, text_color = color.white)    
+
+    
